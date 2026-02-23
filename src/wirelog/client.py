@@ -26,7 +26,7 @@ class WireLog:
 
     Args:
         api_key: API key (pk_, sk_, or aat_). Falls back to WIRELOG_API_KEY env var.
-        host: API base URL. Falls back to WIRELOG_HOST env var or https://wirelog.ai.
+        host: API base URL. Falls back to WIRELOG_HOST env var or https://api.wirelog.ai.
         timeout: HTTP timeout in seconds. Default 30.
     """
 
@@ -38,7 +38,7 @@ class WireLog:
     ) -> None:
         self.api_key = api_key or os.environ.get("WIRELOG_API_KEY", "")
         self.host = (
-            host or os.environ.get("WIRELOG_HOST", "https://wirelog.ai")
+            host or os.environ.get("WIRELOG_HOST", "https://api.wirelog.ai")
         ).rstrip("/")
         self.timeout = timeout
 

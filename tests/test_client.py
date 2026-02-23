@@ -131,12 +131,12 @@ class TestWireLogClient(unittest.TestCase):
 
     def test_constructor_defaults(self) -> None:
         client = WireLog()
-        self.assertEqual(client.host, "https://wirelog.ai")
+        self.assertEqual(client.host, "https://api.wirelog.ai")
         self.assertEqual(client.api_key, "")
 
     def test_host_trailing_slash_stripped(self) -> None:
-        client = WireLog(api_key="sk_test", host="https://wirelog.ai/")
-        self.assertEqual(client.host, "https://wirelog.ai")
+        client = WireLog(api_key="sk_test", host="https://api.wirelog.ai/")
+        self.assertEqual(client.host, "https://api.wirelog.ai")
 
 
 if __name__ == "__main__":

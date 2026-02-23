@@ -18,7 +18,7 @@ jobs:
         run: python -m unittest discover tests -v
       - name: Verify zero dependencies
         run: |
-          pip show wirelog | grep -E "^Requires:" | grep -q "^Requires:$" || \
+          pip show wirelog | grep -E "^Requires:" | grep -qE "^Requires:\s*$" || \
           (echo "ERROR: wirelog has dependencies!" && exit 1)
       - name: Compile check
         run: python -m py_compile src/wirelog/client.py

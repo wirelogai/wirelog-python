@@ -10,6 +10,8 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+__version__ = "0.1.0"
+
 
 class WireLogError(Exception):
     """Raised when the WireLog API returns an error."""
@@ -26,7 +28,6 @@ class WireLog:
 
     Args:
         api_key: API key (pk_, sk_, or aat_). Falls back to WIRELOG_API_KEY env var.
-        host: API base URL. Falls back to WIRELOG_HOST env var or https://api.wirelog.ai.
         timeout: HTTP timeout in seconds. Default 30.
     """
 
@@ -117,6 +118,7 @@ class WireLog:
             data=data,
             headers={
                 "Content-Type": "application/json",
+                "User-Agent": f"wirelog-python/{__version__}",
                 "X-API-Key": self.api_key,
             },
             method="POST",

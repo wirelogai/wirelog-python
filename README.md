@@ -26,16 +26,6 @@ print(result)
 wl.identify("alice@acme.org", device_id="dev_abc", user_properties={"plan": "pro"})
 ```
 
-## Configuration
-
-```python
-wl = WireLog(
-    api_key="sk_...",         # or set WIRELOG_API_KEY env var
-    host="https://api.wirelog.ai", # or set WIRELOG_HOST env var
-    timeout=30,                # HTTP timeout in seconds
-)
-```
-
 ## API
 
 ### `wl.track(event_type, *, user_id, device_id, session_id, event_properties, user_properties, insert_id)`

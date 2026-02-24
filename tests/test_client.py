@@ -79,10 +79,36 @@ class TestWireLogClient(unittest.TestCase):
             {"event_type": "page_view", "user_id": "u_1"},
             {"event_type": "click", "user_id": "u_2"},
         ]
-        result = client.track_batch(events)
+        result = client.track_batch(
+            events,
+            origin="client",
+            client_originated=True,
+        )
 
         self.assertEqual(result, {"accepted": 2})
         self.assertEqual(MockHandler.last_request["body"]["events"], events)
+        self.assertEqual(MockHandler.last_request["body"]["origin"], "client")
+        self.assertEqual(
+            MockHandler.last_request["body"]["clientOriginated"], True
+        )
+
+    def test_track_with_origin_hints(self) -> None:
+        MockHandler.response_body = {"accepted": 1}
+        MockHandler.response_status = 200
+        client = self._client()
+
+        result = client.track(
+            "ai_usage_charged",
+            user_id="u_123",
+            origin="server",
+            client_originated=False,
+        )
+
+        self.assertEqual(result, {"accepted": 1})
+        self.assertEqual(MockHandler.last_request["body"]["origin"], "server")
+        self.assertEqual(
+            MockHandler.last_request["body"]["clientOriginated"], False
+        )
 
     def test_query(self) -> None:
         MockHandler.response_body = {"rows": [{"count": 42}]}

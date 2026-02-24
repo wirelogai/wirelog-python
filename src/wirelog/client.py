@@ -53,6 +53,8 @@ class WireLog:
         event_properties: dict[str, Any] | None = None,
         user_properties: dict[str, Any] | None = None,
         insert_id: str | None = None,
+        origin: str | None = None,
+        client_originated: bool | None = None,
     ) -> dict[str, Any]:
         """Track a single event. Returns {"accepted": N}."""
         body: dict[str, Any] = {"event_type": event_type}
@@ -70,12 +72,27 @@ class WireLog:
             body["insert_id"] = insert_id
         else:
             body["insert_id"] = uuid.uuid4().hex
+        if origin is not None:
+            body["origin"] = origin
+        if client_originated is not None:
+            body["clientOriginated"] = client_originated
         body["time"] = _iso_now()
         return self._post("/track", body)
 
-    def track_batch(self, events: list[dict[str, Any]]) -> dict[str, Any]:
+    def track_batch(
+        self,
+        events: list[dict[str, Any]],
+        *,
+        origin: str | None = None,
+        client_originated: bool | None = None,
+    ) -> dict[str, Any]:
         """Track multiple events. Returns {"accepted": N}."""
-        return self._post("/track", {"events": events})
+        body: dict[str, Any] = {"events": events}
+        if origin is not None:
+            body["origin"] = origin
+        if client_originated is not None:
+            body["clientOriginated"] = client_originated
+        return self._post("/track", body)
 
     def query(
         self,

@@ -24,15 +24,24 @@ print(result)
 
 # Identify a user (bind device → user, set profile)
 wl.identify("alice@acme.org", device_id="dev_abc", user_properties={"plan": "pro"})
+
+# Track forwarded client-origin events from your backend
+wl.track(
+    "ai_usage_charged",
+    user_id="u_123",
+    event_properties={"amount": 1.23},
+    origin="client",
+    client_originated=True,
+)
 ```
 
 ## API
 
-### `wl.track(event_type, *, user_id, device_id, session_id, event_properties, user_properties, insert_id)`
+### `wl.track(event_type, *, user_id, device_id, session_id, event_properties, user_properties, insert_id, origin, client_originated)`
 
 Track a single event. Auto-generates `insert_id` and `time` if not provided.
 
-### `wl.track_batch(events)`
+### `wl.track_batch(events, *, origin=None, client_originated=None)`
 
 Track multiple events in one request (up to 2000).
 

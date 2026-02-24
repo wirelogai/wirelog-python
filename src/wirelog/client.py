@@ -10,7 +10,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 class WireLogError(Exception):

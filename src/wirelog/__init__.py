@@ -1,6 +1,5 @@
 """WireLog analytics client — zero dependencies."""
 
-from wirelog.client import WireLog
+from wirelog.client import WireLog, __version__
 
-__all__ = ["WireLog"]
-__version__ = "0.1.0"
+__all__ = ["WireLog", "__version__"]

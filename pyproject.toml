@@ -19,7 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
 ]
-dependencies = []
+dependencies = [
+    "twine>=6.2.0",
+]
 
 [project.urls]
 Homepage = "https://wirelog.ai"

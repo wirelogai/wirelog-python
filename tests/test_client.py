@@ -51,7 +51,7 @@ class TestWireLogClient(unittest.TestCase):
 
     def _client(self) -> WireLog:
         port = self.server.server_address[1]
-        return WireLog(api_key="sk_test_key", host=f"http://127.0.0.1:{port}")
+        return WireLog(api_key="sk_test_key", host=f"http://127.0.0.1:{port}", flush_interval=0)
 
     def test_track_sends_event(self) -> None:
         MockHandler.response_body = {"accepted": 1}

@@ -13,10 +13,19 @@ from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-__version__ = "0.2.0"
+from wirelog.ratelimit import (
+    DropReason,
+    RateLimitConfig,
+    RateLimiter,
+    RateLimitStats,
+    parse_retry_after,
+)
+
+__version__ = "0.3.0"
 
 _BATCH_MAX = 10
 _QUEUE_MAX = 10000
+_MAX_BATCH_API_SIZE = 2000
 _RETRY_MAX = 3
 _RETRY_BASE_S = 1.0
 _RETRY_MAX_DELAY_S = 30.0
@@ -26,11 +35,35 @@ _DEFAULT_HOST = "https://api.wirelog.ai"
 
 
 class WireLogError(Exception):
-    """Raised when the WireLog API returns an error."""
+    """Raised when the WireLog API returns an error.
 
-    def __init__(self, status: int, message: str) -> None:
+    ``retry_after`` is set to the parsed Retry-After header value (seconds)
+    on 429 responses, or 0.0 if absent or unparseable.
+    """
+
+    def __init__(self, status: int, message: str, retry_after: float = 0.0) -> None:
         super().__init__(f"WireLog API {status}: {message}")
         self.status = status
+        self.retry_after = retry_after
+
+
+class RateLimitedError(Exception):
+    """Reported to ``on_error`` when an event is dropped by the per-instance rate limiter."""
+
+    def __init__(self, reason: DropReason) -> None:
+        super().__init__(f"wirelog: event dropped (rate limited: {reason.value})")
+        self.reason = reason
+
+
+class PayloadTooLargeError(Exception):
+    """Reported to ``on_error`` when an event exceeds ``max_event_bytes``."""
+
+    def __init__(self, size: int, limit: int) -> None:
+        super().__init__(
+            f"wirelog: event dropped (payload {size} bytes exceeds {limit})"
+        )
+        self.size = size
+        self.limit = limit
 
 
 class WireLog:
@@ -69,6 +102,8 @@ class WireLog:
         queue_size: int = _QUEUE_MAX,
         on_error: Callable[[Exception], None] | None = None,
         disabled: bool = False,
+        rate_limit: RateLimitConfig | None = None,
+        _now: Callable[[], float] | None = None,
     ) -> None:
         self.api_key = api_key or os.environ.get("WIRELOG_API_KEY", "")
         self.host = (
@@ -80,6 +115,7 @@ class WireLog:
         self._batch_size = min(max(batch_size, 1), 2000)
         self._flush_interval = flush_interval
         self._closed = False
+        self._limiter = RateLimiter(rate_limit, now=_now)
 
         # Async mode: background thread + queue.
         self._async = flush_interval > 0
@@ -123,6 +159,12 @@ class WireLog:
         if self.disabled or self._closed:
             return None
 
+        # L1+L2: rate limit BEFORE body construction so a hot loop is cheap.
+        reason = self._limiter.allow()
+        if reason is not DropReason.NONE:
+            self._report_error(RateLimitedError(reason))
+            return None
+
         body: dict[str, Any] = {"event_type": event_type}
         if user_id is not None:
             body["user_id"] = user_id
@@ -141,6 +183,20 @@ class WireLog:
             body["clientOriginated"] = client_originated
         body["time"] = _iso_now()
         body["library"] = f"wirelog-python/{__version__}"
+
+        # L5: per-event payload size cap.
+        max_bytes = self._limiter.max_event_bytes()
+        if max_bytes > 0:
+            try:
+                serialized = json.dumps(body).encode("utf-8")
+            except (TypeError, ValueError) as exc:
+                self._limiter.record_payload_drop()
+                self._report_error(exc)
+                return None
+            if len(serialized) > max_bytes:
+                self._limiter.record_payload_drop()
+                self._report_error(PayloadTooLargeError(len(serialized), max_bytes))
+                return None
 
         if not self._async:
             return self._post("/track", body)
@@ -172,8 +228,48 @@ class WireLog:
         """Track multiple events in a single request (up to 2000).
 
         Always sends immediately, regardless of async/sync mode.
+
+        Each event in the batch is checked individually against the
+        per-instance rate limiter (L1+L2) and the per-event payload size
+        cap (L5). Events that fail either check are silently dropped from
+        the batch and counted in ``rate_limit_stats()``. Batches larger
+        than 2000 events raise ``ValueError`` (matches the server's
+        ``MaxBatchSize``). When the client is disabled or closed, returns
+        ``{"accepted": 0}`` without sending.
         """
-        body: dict[str, Any] = {"events": events}
+        if self.disabled or self._closed:
+            return {"accepted": 0}
+        if len(events) > _MAX_BATCH_API_SIZE:
+            raise ValueError(
+                f"wirelog: batch of {len(events)} events exceeds max {_MAX_BATCH_API_SIZE}"
+            )
+
+        survivors: list[dict[str, Any]] = []
+        max_bytes = self._limiter.max_event_bytes()
+        for event in events:
+            reason = self._limiter.allow()
+            if reason is not DropReason.NONE:
+                self._report_error(RateLimitedError(reason))
+                continue
+            if max_bytes > 0:
+                try:
+                    serialized = json.dumps(event).encode("utf-8")
+                except (TypeError, ValueError) as exc:
+                    self._limiter.record_payload_drop()
+                    self._report_error(exc)
+                    continue
+                if len(serialized) > max_bytes:
+                    self._limiter.record_payload_drop()
+                    self._report_error(
+                        PayloadTooLargeError(len(serialized), max_bytes)
+                    )
+                    continue
+            survivors.append(event)
+
+        if not survivors:
+            return {"accepted": 0}
+
+        body: dict[str, Any] = {"events": survivors}
         if origin is not None:
             body["origin"] = origin
         if client_originated is not None:
@@ -202,7 +298,17 @@ class WireLog:
         user_properties: dict[str, Any] | None = None,
         user_property_ops: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Bind device to user and/or set profile properties."""
+        """Bind device to user and/or set profile properties.
+
+        Identify counts against the same per-instance rate limiter as
+        ``track`` so a remount loop or startup loop can't open unbounded
+        identify requests. When the limiter rejects the call,
+        :class:`RateLimitedError` is raised.
+        """
+        reason = self._limiter.allow()
+        if reason is not DropReason.NONE:
+            raise RateLimitedError(reason)
+
         body: dict[str, Any] = {"user_id": user_id}
         if device_id is not None:
             body["device_id"] = device_id
@@ -211,6 +317,10 @@ class WireLog:
         if user_property_ops is not None:
             body["user_property_ops"] = user_property_ops
         return self._post("/identify", body)
+
+    def rate_limit_stats(self) -> RateLimitStats:
+        """Return a snapshot of per-instance rate limiter drop counters."""
+        return self._limiter.stats()
 
     def flush(self) -> None:
         """Flush all buffered events. Blocks until the queue is drained.
@@ -283,6 +393,7 @@ class WireLog:
 
         payload: dict[str, Any] = {"events": events}
         for attempt in range(_RETRY_MAX + 1):
+            retry_after = 0.0
             try:
                 self._post("/track", payload)
                 return
@@ -293,14 +404,17 @@ class WireLog:
                 if attempt >= _RETRY_MAX:
                     self._report_error(e)
                     return
+                retry_after = e.retry_after
             except (URLError, OSError) as e:
                 if attempt >= _RETRY_MAX:
                     self._report_error(e)
                     return
 
-            delay = min(
-                _RETRY_BASE_S * (2**attempt), _RETRY_MAX_DELAY_S
-            )
+            # L6: prefer the server-provided Retry-After when present.
+            if retry_after > 0:
+                delay = min(retry_after, _RETRY_MAX_DELAY_S)
+            else:
+                delay = min(_RETRY_BASE_S * (2**attempt), _RETRY_MAX_DELAY_S)
             time.sleep(delay)
 
     # --- HTTP transport ---
@@ -328,7 +442,9 @@ class WireLog:
                 return raw.decode("utf-8")
         except HTTPError as e:
             msg = e.read().decode("utf-8", errors="replace")
-            raise WireLogError(e.code, msg) from e
+            retry_after_header = e.headers.get("Retry-After") if e.headers else None
+            retry_after = parse_retry_after(retry_after_header)
+            raise WireLogError(e.code, msg, retry_after=retry_after) from e
 
     def _report_error(self, err: Exception) -> None:
         if self._on_error is not None:

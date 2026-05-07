@@ -10,10 +10,13 @@ Usage:
 
 Environment:
   PYPI_TOKEN     Optional. If set, used as a PyPI API token for upload.
+                 Otherwise twine reads ~/.pypirc.
 
 Notes:
   - Default upload target: PyPI (https://upload.pypi.org/legacy/)
   - --dry-run builds and validates artifacts, but does not upload.
+  - Uses uv for build + twine so this works on macOS Homebrew Python
+    (where `python3 -m pip install` fails with externally-managed-environment).
 USAGE
 }
 
@@ -25,13 +28,17 @@ fi
 
 cd "$(dirname "$0")"
 
+if ! command -v uv >/dev/null 2>&1; then
+  echo "ERROR: uv is required (install: https://docs.astral.sh/uv/getting-started/installation/)" >&2
+  exit 1
+fi
+
 echo "Building source and wheel distributions..."
-python3 -m pip install --upgrade build twine
 rm -rf dist
-python3 -m build
+uv build
 
 echo "Validating distributions..."
-python3 -m twine check dist/*
+uv tool run twine check dist/*
 
 if [[ "$mode" == "--dry-run" ]]; then
   echo "Dry run complete. Skipping upload."
@@ -43,7 +50,7 @@ if [[ -n "${PYPI_TOKEN:-}" ]]; then
   export TWINE_PASSWORD="$PYPI_TOKEN"
 fi
 
-upload_cmd=(python3 -m twine upload)
+upload_cmd=(uv tool run twine upload)
 if [[ "$mode" == "--testpypi" ]]; then
   upload_cmd+=(--repository-url "https://test.pypi.org/legacy/")
 fi
